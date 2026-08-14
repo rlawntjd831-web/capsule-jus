@@ -1,0 +1,10 @@
+{
+  "auth": {
+    "providers": {
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "캡슐 미",
+        "supportEmail": "rlawntjd831@gmail.com"
+      }
+    }
+  }
+}
