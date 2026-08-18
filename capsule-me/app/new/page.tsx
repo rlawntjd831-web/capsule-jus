@@ -1,32 +1,83 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import type { User } from "firebase/auth";
 import { useAuth } from "@/components/AuthProvider";
+import { GoogleLoginButton } from "@/components/GoogleLoginButton";
+import { KeywordChips } from "@/components/KeywordChips";
+import { NowWeather } from "@/components/NowWeather";
+import { WeatherScene } from "@/components/WeatherScene";
+import { normalizeMood, type CapsuleMood, type CapsuleShape } from "@/lib/capsuleStyle";
+import { fetchLiveWeather, getCurrentCoords, type LiveWeather } from "@/lib/liveWeather";
 import { supabase } from "@/lib/supabase";
 
 const BUCKET = "capsule-jus";
+const DRAFT_KEY = "capsule-me-pending-bury";
 
 type Preview = {
   file: File;
   url: string;
 };
 
+type Prepared = {
+  weather: LiveWeather;
+  mood: CapsuleMood;
+};
+
+type Draft = {
+  to: string;
+  letter: string;
+  openAt: string;
+  prepared: Prepared | null;
+  pendingBury: boolean;
+};
+
 export default function NewPage() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const router = useRouter();
   const [to, setTo] = useState("");
   const [letter, setLetter] = useState("");
   const [openAt, setOpenAt] = useState("");
   const [previews, setPreviews] = useState<Preview[]>([]);
+  const [prepared, setPrepared] = useState<Prepared | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [draftReady, setDraftReady] = useState(false);
+  const pendingBuryRef = useRef(false);
+  const buryingRef = useRef(false);
+
+  useEffect(() => {
+    const draft = readDraft();
+    if (draft) {
+      setTo(draft.to);
+      setLetter(draft.letter);
+      setOpenAt(draft.openAt);
+      setPrepared(draft.prepared);
+      pendingBuryRef.current = draft.pendingBury;
+    }
+    setDraftReady(true);
+  }, []);
 
   useEffect(() => {
     return () => {
       previews.forEach((item) => URL.revokeObjectURL(item.url));
     };
   }, [previews]);
+
+  useEffect(() => {
+    if (!draftReady || loading || !user || !pendingBuryRef.current) return;
+    pendingBuryRef.current = false;
+    clearDraft();
+    void buryCapsule(user);
+    // buryCapsule reads latest form state from this render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftReady, loading, user]);
+
+  function markDirty() {
+    setSuccess(false);
+    setPrepared(null);
+  }
 
   function handlePhotosChange(files: FileList | null) {
     previews.forEach((item) => URL.revokeObjectURL(item.url));
@@ -35,17 +86,33 @@ export default function NewPage() {
       url: URL.createObjectURL(file),
     }));
     setPreviews(next);
-    setSuccess(false);
+    markDirty();
   }
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function prepareCapsule() {
+    const coords = await getCurrentCoords();
+    const weather = await fetchLiveWeather(coords.lat, coords.lng);
+    const generated = await fetchMood(letter, to, weather);
+    const mood = normalizeMood(
+      generated
+        ? {
+            ...generated,
+            shape: generated.shape as CapsuleShape,
+          }
+        : null,
+      weather.sky,
+      weather.temperature,
+    );
+    const next = { weather, mood };
+    setPrepared(next);
+    return next;
+  }
 
-    if (!user) {
-      alert("로그인 먼저!");
-      return;
-    }
-
+  async function buryCapsule(owner: User, ready?: Prepared) {
+    if (buryingRef.current) return;
+    buryingRef.current = true;
+    pendingBuryRef.current = false;
+    const snapshot = ready ?? prepared ?? (await prepareCapsule());
     setSuccess(false);
     setSubmitting(true);
     try {
@@ -56,7 +123,7 @@ export default function NewPage() {
       for (let i = 0; i < previews.length; i += 1) {
         const file = previews[i].file;
         const ext = getExtension(file);
-        const storage_path = `${user.uid}_${timestamp}_${i}.${ext}`;
+        const storage_path = `${owner.uid}_${timestamp}_${i}.${ext}`;
 
         const { error: uploadError } = await supabase.storage
           .from(BUCKET)
@@ -81,10 +148,17 @@ export default function NewPage() {
       const { data: capsule, error: capsuleError } = await supabase
         .from("capsules")
         .insert({
-          firebase_uid: user.uid,
+          firebase_uid: owner.uid,
           recipient: to,
           letter,
           open_at: openAt ? new Date(openAt).toISOString() : null,
+          weather_sky: snapshot.weather.sky,
+          weather_temp: snapshot.weather.temperature,
+          weather_humidity: snapshot.weather.humidity,
+          mood_line: snapshot.mood.line,
+          keywords: snapshot.mood.keywords,
+          capsule_shape: snapshot.mood.shape,
+          capsule_color: snapshot.mood.color,
         })
         .select("id")
         .single();
@@ -108,6 +182,7 @@ export default function NewPage() {
         }
       }
 
+      clearDraft();
       setSuccess(true);
       window.setTimeout(() => {
         router.push("/");
@@ -115,6 +190,37 @@ export default function NewPage() {
     } catch (error) {
       console.error(error);
       alert("캡슐을 묻지 못했습니다.");
+      buryingRef.current = false;
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function queueBury() {
+    pendingBuryRef.current = true;
+    writeDraft({
+      to,
+      letter,
+      openAt,
+      prepared,
+      pendingBury: true,
+    });
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (user) {
+      await buryCapsule(user);
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await prepareCapsule();
+    } catch (error) {
+      console.error(error);
+      alert("캡슐을 만들지 못했습니다.");
     } finally {
       setSubmitting(false);
     }
@@ -124,8 +230,16 @@ export default function NewPage() {
     <div className="flex min-h-full flex-1 items-center justify-center px-6 py-16">
       <main className="w-full max-w-md rounded-3xl border border-rose-100/80 bg-white/80 px-8 py-10 shadow-xl shadow-rose-100/60 backdrop-blur-sm">
         <h1 className="text-center text-3xl font-semibold tracking-tight text-stone-800">
-          캡슐 묻기
+          {user ? "캡슐 묻기" : "캡슐 만들어보기"}
         </h1>
+        {user ? null : (
+          <p className="mt-3 text-center text-sm text-stone-500">
+            먼저 캡슐을 만들어 보고, 묻을 때만 로그인하면 돼요
+          </p>
+        )}
+        <div className="mt-6">
+          <NowWeather compact hint="묻는 순간의 날씨와 위치가 함께 저장돼요" />
+        </div>
         <form
           className="mt-8 flex flex-col gap-5"
           onSubmit={(event) => void handleSubmit(event)}
@@ -136,7 +250,7 @@ export default function NewPage() {
               value={to}
               onChange={(event) => {
                 setTo(event.target.value);
-                setSuccess(false);
+                markDirty();
               }}
               disabled={submitting}
               className="rounded-2xl border border-rose-100 bg-white px-4 py-3 text-stone-800 outline-none focus:border-stone-400 disabled:opacity-60"
@@ -148,7 +262,7 @@ export default function NewPage() {
               value={letter}
               onChange={(event) => {
                 setLetter(event.target.value);
-                setSuccess(false);
+                markDirty();
               }}
               rows={6}
               disabled={submitting}
@@ -162,7 +276,7 @@ export default function NewPage() {
               value={openAt}
               onChange={(event) => {
                 setOpenAt(event.target.value);
-                setSuccess(false);
+                markDirty();
               }}
               disabled={submitting}
               className="rounded-2xl border border-rose-100 bg-white px-4 py-3 text-stone-800 outline-none focus:border-stone-400 disabled:opacity-60"
@@ -191,14 +305,65 @@ export default function NewPage() {
               ))}
             </div>
           ) : null}
-          <button
-            type="submit"
-            disabled={submitting}
-            aria-busy={submitting}
-            className="mt-2 rounded-full bg-stone-800 px-7 py-3 text-sm font-medium text-white shadow-md shadow-stone-300 transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {submitting ? "묻는 중..." : "캡슐묻기"}
-          </button>
+
+          {prepared ? (
+            <CapsulePreview mood={prepared.mood} guest={!user} />
+          ) : (
+            <p className="text-center text-xs text-stone-400">
+              위에 보이는 지금 날씨로 그날의 한마디와 키워드가 붙어요
+            </p>
+          )}
+
+          {user || !prepared ? (
+            <button
+              type="submit"
+              disabled={submitting}
+              aria-busy={submitting}
+              className="mt-2 rounded-full bg-stone-800 px-7 py-3 text-sm font-medium text-white shadow-md shadow-stone-300 transition hover:bg-stone-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {submitting
+                ? user
+                  ? "묻는 중..."
+                  : "만드는 중..."
+                : user
+                  ? "캡슐묻기"
+                  : "미리 만들어보기"}
+            </button>
+          ) : (
+            <div className="mt-2 flex flex-col items-center gap-3">
+              <p className="text-center text-sm text-stone-500">
+                이 캡슐을 땅에 묻으려면 로그인이 필요해요
+              </p>
+              <GoogleLoginButton
+                className="rounded-full bg-stone-800 px-7 py-3 text-sm font-medium text-white shadow-md shadow-stone-300 transition hover:bg-stone-700 disabled:opacity-60"
+                onBeforeSignIn={queueBury}
+                onSuccess={(signedIn) => {
+                  if (signedIn) {
+                    void buryCapsule(signedIn);
+                  }
+                }}
+                onError={() => {
+                  pendingBuryRef.current = false;
+                  writeDraft({
+                    to,
+                    letter,
+                    openAt,
+                    prepared,
+                    pendingBury: false,
+                  });
+                }}
+              >
+                Google로 묻고 저장하기
+              </GoogleLoginButton>
+              <button
+                type="button"
+                onClick={markDirty}
+                className="text-xs text-stone-400 underline-offset-4 hover:text-stone-600 hover:underline"
+              >
+                다시 만들기
+              </button>
+            </div>
+          )}
           {success ? (
             <p className="text-center text-sm font-medium text-emerald-700">
               캡슐을 성공적으로 묻었어요
@@ -210,10 +375,74 @@ export default function NewPage() {
   );
 }
 
+function CapsulePreview({ mood, guest }: { mood: CapsuleMood; guest: boolean }) {
+  return (
+    <div className="overflow-hidden rounded-3xl border border-white/50 text-center shadow-md shadow-rose-100/40">
+      <WeatherScene
+        shape={mood.shape}
+        className="h-28"
+      />
+      <div className="bg-white/90 px-5 py-4">
+        {guest ? (
+          <p className="text-xs font-medium tracking-wide text-rose-400">미리보기</p>
+        ) : null}
+        <p className="mt-2 text-sm leading-6 text-stone-600">{mood.line}</p>
+        <KeywordChips keywords={mood.keywords} className="mt-3 justify-center" />
+      </div>
+    </div>
+  );
+}
+
 function getExtension(file: File) {
   const fromName = file.name.split(".").pop()?.toLowerCase();
   if (fromName && fromName !== file.name.toLowerCase()) {
     return fromName;
   }
   return file.type.split("/")[1] || "bin";
+}
+
+async function fetchMood(
+  letter: string,
+  recipient: string,
+  weather: {
+    sky: string | null;
+    temperature: number | null;
+    humidity: number | null;
+  },
+) {
+  try {
+    const res = await fetch("/api/capsule-mood", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ letter, recipient, weather }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as {
+      line: string;
+      keywords: string[];
+      shape: string;
+      color: string;
+    };
+  } catch {
+    return null;
+  }
+}
+
+function readDraft(): Draft | null {
+  try {
+    const raw = sessionStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as Draft;
+  } catch {
+    return null;
+  }
+}
+
+function writeDraft(draft: Draft) {
+  sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+}
+
+function clearDraft() {
+  sessionStorage.removeItem(DRAFT_KEY);
 }

@@ -3,8 +3,17 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { CapsuleWeather } from "@/components/CapsuleWeather";
 import { Countdown } from "@/components/Countdown";
-import { formatOpenAt, type Capsule } from "@/lib/capsules";
+import { KeywordChips } from "@/components/KeywordChips";
+import { WeatherScene } from "@/components/WeatherScene";
+import {
+  CAPSULE_SELECT,
+  formatOpenAt,
+  moodFromCapsule,
+  type Capsule,
+} from "@/lib/capsules";
+import type { CapsuleMood } from "@/lib/capsuleStyle";
 import { supabase } from "@/lib/supabase";
 
 const isDev = process.env.NODE_ENV === "development";
@@ -27,9 +36,7 @@ export default function CapsulePage() {
     async function load() {
       const { data, error } = await supabase
         .from("capsules")
-        .select(
-          "id, recipient, letter, open_at, created_at, firebase_uid, capsule_photos(id, public_url, storage_path, sort_order)",
-        )
+        .select(CAPSULE_SELECT)
         .eq("id", params.id)
         .maybeSingle();
 
@@ -73,6 +80,7 @@ export default function CapsulePage() {
   const open = naturallyOpen || forcePreview;
   const photos = [...capsule.capsule_photos].sort((a, b) => a.sort_order - b.sort_order);
   const title = capsule.recipient ? `${capsule.recipient}에게` : "이름 없는 캡슐";
+  const mood = moodFromCapsule(capsule);
 
   return (
     <main className="mx-auto w-full max-w-2xl flex-1 px-6 py-10">
@@ -89,12 +97,16 @@ export default function CapsulePage() {
           letter={capsule.letter}
           openAt={capsule.open_at}
           photos={photos}
+          capsule={capsule}
+          mood={mood}
           previewed={forcePreview && !naturallyOpen}
         />
       ) : (
         <LockedCapsule
           title={title}
           openAt={capsule.open_at}
+          capsule={capsule}
+          mood={mood}
           onPreview={() => setForcePreview(true)}
         />
       )}
@@ -105,26 +117,41 @@ export default function CapsulePage() {
 function LockedCapsule({
   title,
   openAt,
+  capsule,
+  mood,
   onPreview,
 }: {
   title: string;
   openAt: string | null;
+  capsule: Capsule;
+  mood: CapsuleMood;
   onPreview: () => void;
 }) {
   return (
-    <article className="relative mt-6 overflow-hidden rounded-[2rem] border border-rose-100/80 bg-white/80 px-6 py-16 text-center shadow-xl shadow-rose-100/50">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(251,191,36,0.18),transparent_55%)]" />
-      <div className="relative">
-        <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full border border-rose-200 bg-linear-to-b from-rose-50 to-amber-50 text-2xl text-rose-300 shadow-inner">
-          ✧
-        </div>
-        <p className="mt-8 text-sm font-medium tracking-wide text-rose-400">
+    <article className="relative mt-6 overflow-hidden rounded-[2rem] border border-white/40 text-center shadow-xl shadow-rose-100/50">
+      <WeatherScene
+        shape={mood.shape}
+        className="h-36"
+      />
+      <div className="relative bg-white/90 px-6 py-10">
+        <p className="text-sm font-medium tracking-wide text-rose-400">
           아직 기간이 남았어요
         </p>
         <h1 className="mt-3 text-3xl font-semibold tracking-tight text-stone-800">
           {title}
         </h1>
         <p className="mt-3 text-sm text-stone-400">{formatOpenAt(openAt)}</p>
+        <CapsuleWeather
+          capsule={capsule}
+          className="mt-2 text-sm text-stone-500"
+        />
+        <p className="mx-auto mt-5 max-w-sm text-base leading-7 text-stone-600">
+          {mood.line}
+        </p>
+        <KeywordChips
+          keywords={mood.keywords}
+          className="mt-5 justify-center"
+        />
         <div className="mx-auto mt-10 max-w-sm rounded-3xl border border-rose-100 bg-white/70 px-6 py-5">
           <p className="text-xs tracking-[0.2em] text-stone-400">REMAINING</p>
           <Countdown
@@ -133,7 +160,7 @@ function LockedCapsule({
           />
         </div>
         <p className="mt-6 text-sm leading-relaxed text-stone-400">
-          열람일이 되어야 편지와 사진을 열어볼 수 있어요
+          키워드만 먼저 볼 수 있어요. 편지와 사진은 열람일에 열립니다
         </p>
         {isDev ? (
           <button
@@ -154,25 +181,24 @@ function OpenedCapsule({
   letter,
   openAt,
   photos,
+  capsule,
+  mood,
   previewed,
 }: {
   title: string;
   letter: string;
   openAt: string | null;
   photos: Capsule["capsule_photos"];
+  capsule: Capsule;
+  mood: CapsuleMood;
   previewed: boolean;
 }) {
   return (
-    <article className="mt-6 overflow-hidden rounded-[2rem] border border-rose-100/80 bg-white/85 shadow-xl shadow-rose-100/50">
-      {photos[0] ? (
-        <img
-          src={photos[0].public_url}
-          alt=""
-          className="h-56 w-full object-cover sm:h-72"
-        />
-      ) : (
-        <div className="h-40 bg-linear-to-br from-rose-100 via-amber-50 to-stone-100" />
-      )}
+    <article className="mt-6 overflow-hidden rounded-[2rem] border border-white/40 bg-white/85 shadow-xl shadow-rose-100/50">
+      <WeatherScene
+        shape={mood.shape}
+        className="h-36 sm:h-40"
+      />
       <div className="px-6 py-8 sm:px-8">
         {previewed ? (
           <p className="text-xs text-stone-300">개발 모드 바로보기</p>
@@ -183,6 +209,12 @@ function OpenedCapsule({
           {title}
         </h1>
         <p className="mt-2 text-sm text-stone-400">{formatOpenAt(openAt)}</p>
+        <CapsuleWeather
+          capsule={capsule}
+          className="mt-2 text-sm text-stone-500"
+        />
+        <p className="mt-5 text-base leading-7 text-stone-600">{mood.line}</p>
+        <KeywordChips keywords={mood.keywords} className="mt-4" />
         <div className="mt-8 rounded-3xl bg-linear-to-b from-amber-50/80 to-white px-5 py-6">
           {letter ? (
             <p className="whitespace-pre-wrap text-base leading-8 text-stone-700">

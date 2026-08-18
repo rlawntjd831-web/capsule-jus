@@ -24,3 +24,21 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+@keyframes weather-drift {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(10px); }
+}
+
+@keyframes weather-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+.weather-icon-float {
+  animation: weather-float 8s ease-in-out infinite;
+}
+
+.weather-icon-drift {
+  animation: weather-drift 14s ease-in-out infinite;
+}

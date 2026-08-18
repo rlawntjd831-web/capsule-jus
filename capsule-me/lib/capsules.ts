@@ -1,3 +1,6 @@
+import { normalizeMood, type CapsuleMood, type CapsuleShape } from "@/lib/capsuleStyle";
+import { supabase } from "@/lib/supabase";
+
 export type CapsulePhoto = {
   id: number;
   public_url: string;
@@ -12,8 +15,51 @@ export type Capsule = {
   open_at: string | null;
   created_at: string;
   firebase_uid: string;
+  weather_sky: string | null;
+  weather_temp: number | null;
+  weather_humidity: number | null;
+  mood_line: string | null;
+  keywords: string[] | null;
+  capsule_shape: string | null;
+  capsule_color: string | null;
   capsule_photos: CapsulePhoto[];
 };
+
+export const CAPSULE_SELECT =
+  "id, recipient, letter, open_at, created_at, firebase_uid, weather_sky, weather_temp, weather_humidity, mood_line, keywords, capsule_shape, capsule_color, capsule_photos(id, public_url, storage_path, sort_order)";
+
+export async function fetchCapsuleCount() {
+  const { count, error } = await supabase
+    .from("capsules")
+    .select("id", { count: "exact", head: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return count ?? 0;
+}
+
+export function moodFromCapsule(capsule: Capsule): CapsuleMood {
+  return normalizeMood(
+    {
+      line: capsule.mood_line ?? undefined,
+      keywords: capsule.keywords ?? undefined,
+      shape: capsule.capsule_shape as CapsuleShape,
+      color: capsule.capsule_color ?? undefined,
+    },
+    capsule.weather_sky,
+    capsule.weather_temp == null ? null : Number(capsule.weather_temp),
+  );
+}
+
+export function formatWeather(capsule: Pick<Capsule, "weather_sky" | "weather_temp" | "weather_humidity">) {
+  const parts: string[] = [];
+  if (capsule.weather_sky) parts.push(capsule.weather_sky);
+  if (capsule.weather_temp != null) parts.push(`${capsule.weather_temp}℃`);
+  if (capsule.weather_humidity != null) parts.push(`습도 ${capsule.weather_humidity}%`);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
 
 export function isCapsuleOpen(openAt: string | null) {
   if (!openAt) return true;

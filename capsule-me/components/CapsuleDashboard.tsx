@@ -3,9 +3,15 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Countdown } from "@/components/Countdown";
+import { KeywordChips } from "@/components/KeywordChips";
+import { CapsuleWeather } from "@/components/CapsuleWeather";
+import { NowWeather } from "@/components/NowWeather";
+import { WeatherScene } from "@/components/WeatherScene";
 import {
+  CAPSULE_SELECT,
   formatOpenAt,
   isCapsuleOpen,
+  moodFromCapsule,
   type Capsule,
 } from "@/lib/capsules";
 import { supabase } from "@/lib/supabase";
@@ -21,9 +27,7 @@ export function CapsuleDashboard() {
     async function load() {
       const { data, error: fetchError } = await supabase
         .from("capsules")
-        .select(
-          "id, recipient, letter, open_at, created_at, firebase_uid, capsule_photos(id, public_url, storage_path, sort_order)",
-        )
+        .select(CAPSULE_SELECT)
         .order("open_at", { ascending: true, nullsFirst: false });
 
       if (cancelled) return;
@@ -49,7 +53,8 @@ export function CapsuleDashboard() {
 
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-10">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <NowWeather hint="지금 이 순간의 날씨와 위치예요" />
+      <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight text-stone-800">
             묻힌 캡슐
@@ -81,10 +86,7 @@ export function CapsuleDashboard() {
         <ul className="mt-8 grid gap-4 sm:grid-cols-2">
           {capsules.map((capsule) => {
             const open = isCapsuleOpen(capsule.open_at);
-            const photos = [...capsule.capsule_photos].sort(
-              (a, b) => a.sort_order - b.sort_order,
-            );
-            const cover = open ? photos[0]?.public_url : undefined;
+            const mood = moodFromCapsule(capsule);
 
             return (
               <li key={capsule.id}>
@@ -92,18 +94,11 @@ export function CapsuleDashboard() {
                   href={`/capsule/${capsule.id}`}
                   className="flex h-full flex-col overflow-hidden rounded-3xl border border-rose-100/80 bg-white/80 shadow-lg shadow-rose-100/40 transition hover:-translate-y-0.5 hover:shadow-xl"
                 >
-                  <div className="relative h-40 bg-linear-to-br from-rose-100 via-amber-50 to-stone-100">
-                    {cover ? (
-                      <img
-                        src={cover}
-                        alt=""
-                        className="h-full w-full object-cover"
-                      />
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-sm text-stone-400">
-                        {open ? "사진 없음" : "봉인됨"}
-                      </div>
-                    )}
+                  <div className="relative h-36">
+                    <WeatherScene
+                      shape={mood.shape}
+                      className="h-full"
+                    />
                     <span
                       className={`absolute top-3 right-3 rounded-full px-3 py-1 text-xs font-medium ${
                         open
@@ -121,6 +116,11 @@ export function CapsuleDashboard() {
                     <p className="mt-1 text-sm text-stone-400">
                       {formatOpenAt(capsule.open_at)}
                     </p>
+                    <CapsuleWeather
+                      capsule={capsule}
+                      className="mt-1 text-sm text-stone-500"
+                    />
+                    <KeywordChips keywords={mood.keywords} className="mt-3" />
                     <Countdown
                       openAt={capsule.open_at}
                       className="mt-3 text-sm font-medium text-rose-400"

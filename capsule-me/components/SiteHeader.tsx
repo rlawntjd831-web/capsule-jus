@@ -2,27 +2,15 @@
 
 import Link from "next/link";
 import { signOut } from "firebase/auth";
-import { useState } from "react";
+import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
+import { GoogleLoginButton } from "@/components/GoogleLoginButton";
 import { auth } from "@/lib/firebase";
-import { getAuthErrorCode, signInWithGoogle } from "@/lib/googleSignIn";
 
 export function SiteHeader() {
   const { user, loading } = useAuth();
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState("");
-
-  async function handleGoogleLogin() {
-    setError("");
-    setPending(true);
-    try {
-      await signInWithGoogle();
-    } catch (err) {
-      setError(getAuthErrorMessage(err));
-    } finally {
-      setPending(false);
-    }
-  }
+  const pathname = usePathname();
+  const tryingCapsule = pathname === "/new";
 
   return (
     <header className="sticky top-0 z-10 border-b border-rose-100/80 bg-white/80 backdrop-blur-sm">
@@ -53,34 +41,22 @@ export function SiteHeader() {
               </button>
             </>
           ) : (
-            <button
-              type="button"
-              onClick={() => void handleGoogleLogin()}
-              disabled={pending}
-              className="rounded-full bg-stone-800 px-4 py-2 text-sm font-medium text-white transition hover:bg-stone-700 disabled:opacity-60"
-            >
-              {pending ? "로그인 중..." : "Google로 시작하기"}
-            </button>
+            <>
+              {tryingCapsule ? null : (
+                <Link
+                  href="/new"
+                  className="rounded-full bg-stone-800 px-4 py-2 text-sm font-medium text-white transition hover:bg-stone-700"
+                >
+                  캡슐 체험하기
+                </Link>
+              )}
+              <GoogleLoginButton className="text-sm text-stone-400 underline-offset-4 hover:text-stone-600 hover:underline disabled:opacity-60">
+                로그인
+              </GoogleLoginButton>
+            </>
           )}
         </div>
       </div>
-      {error ? (
-        <p className="px-6 pb-3 text-center text-sm text-rose-500">{error}</p>
-      ) : null}
     </header>
   );
-}
-
-function getAuthErrorMessage(err: unknown) {
-  const code = getAuthErrorCode(err);
-  if (code === "auth/operation-not-allowed") {
-    return "콘솔에서 Google 로그인을 아직 켜지 않았습니다.";
-  }
-  if (code === "auth/popup-closed-by-user") {
-    return "로그인 창이 닫혔습니다. 다시 시도해 주세요.";
-  }
-  if (code === "auth/unauthorized-domain") {
-    return "이 도메인은 아직 승인되지 않았습니다.";
-  }
-  return "로그인에 실패했습니다. 다시 시도해 주세요.";
 }
