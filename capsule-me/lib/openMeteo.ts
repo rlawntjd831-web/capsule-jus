@@ -84,10 +84,9 @@ function snapshotFromHour(
   let best = 0;
   let bestDiff = Infinity;
   for (let i = 0; i < times.length; i += 1) {
+    const time = times[i];
     const stamp =
-      typeof times[i] === "number"
-        ? times[i] * 1000
-        : new Date(times[i]).getTime();
+      typeof time === "number" ? time * 1000 : new Date(String(time ?? "")).getTime();
     const diff = Math.abs(stamp - target);
     if (diff < bestDiff) {
       best = i;
