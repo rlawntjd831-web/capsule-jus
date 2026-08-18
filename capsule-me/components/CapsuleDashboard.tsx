@@ -28,7 +28,7 @@ export function CapsuleDashboard() {
       const { data, error: fetchError } = await supabase
         .from("capsules")
         .select(CAPSULE_SELECT)
-        .order("open_at", { ascending: true, nullsFirst: false });
+        .order("created_at", { ascending: false });
 
       if (cancelled) return;
 
@@ -52,7 +52,7 @@ export function CapsuleDashboard() {
   const lockedCount = capsules.length - openCount;
 
   return (
-    <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-10">
+    <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-10">
       <NowWeather hint="지금 이 순간의 날씨와 위치예요" />
       <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
@@ -83,7 +83,7 @@ export function CapsuleDashboard() {
           </Link>
         </div>
       ) : (
-        <ul className="mt-8 grid gap-4 sm:grid-cols-2">
+        <ul className="mt-8 grid gap-4">
           {capsules.map((capsule) => {
             const open = isCapsuleOpen(capsule.open_at);
             const mood = moodFromCapsule(capsule);
